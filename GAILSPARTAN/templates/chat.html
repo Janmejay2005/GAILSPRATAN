@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat</title> 
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h2>GAILSPARTAN</h2>
+    <div class="chat-container">
+        <div id="chat-response"></div>
+        <div class="chat-input">
+            <input type="text" id="user-message" required>
+            <button type="submit" id="send-button">Ask</button>
+        </div>
+    </div>
+    <script>
+        document.getElementById('send-button').addEventListener('click', function(event) {
+            event.preventDefault();
+            const userMessage = document.getElementById('user-message').value;
+            // ... (rest of the JavaScript code from the previous response)
+        });
+    </script>
+</body>
+</html>

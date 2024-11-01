@@ -1,0 +1,85 @@
+import sqlite3
+import os
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+
+def init_db():
+
+    if not os.path.exists('chatbot.db'):
+
+        conn = sqlite3.connect('chatbot.db')
+
+        c = conn.cursor()
+
+        c.execute('''
+
+            CREATE TABLE IF NOT EXISTS users (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                username TEXT NOT NULL UNIQUE,
+
+                password TEXT NOT NULL,
+
+                email TEXT NOT NULL UNIQUE,
+
+                role TEXT NOT NULL,
+
+                verification_code TEXT
+
+            )
+
+        ''')
+
+        c.execute('''
+
+            CREATE TABLE IF NOT EXISTS chat_history (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                user_id INTEGER,
+
+                message TEXT NOT NULL,
+
+                response TEXT NOT NULL,
+
+                FOREIGN KEY (user_id) REFERENCES users (id)
+
+            )
+
+        ''')
+
+
+
+        # Insert predefined users
+
+        users = [
+
+            ('Riddhi Singh', generate_password_hash('riddhi@a'), 'singhriddhi237@gmail.com'', 'team_member'),
+
+            ('Rose Banga', generate_password_hash('rose@b'), 'rosebanga1306@gmail.com', 'team_member'),
+
+            ('Janmejay Kumar Singh', generate_password_hash('janmejay@ks'), 'janmejaykumarsinghsharp@gmail.com', 'team_member'),
+
+            ('Omkar Agrawal', generate_password_hash('omkar@a'), 'omkaraggarwaal00@gmail.com', 'team_member'),
+
+            ('Aditya Jha', generate_password_hash('aditya@j'), 'jhaa8933@gmail.com', 'team_member'),
+
+            ('Atul Patel', generate_password_hash('atul@p'), 'atulk4360@gmail.com', 'team_member'),
+
+            ('Ashish Sir', generate_password_hash('ashish@d'), 'supervisor@example.com', 'supervisor')
+
+        ]
+
+
+
+        c.executemany('INSERT INTO users (username, password, email, role) VALUES (?, ?, ?, ?)', users)
+
+        conn.commit()
+
+        conn.close()
+
+
+
+init_db()
