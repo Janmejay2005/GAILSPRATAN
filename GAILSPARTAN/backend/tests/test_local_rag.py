@@ -5,6 +5,7 @@ from io import BytesIO
 from backend.extensions import db
 from backend.models import User
 from backend.rag import (
+    CONFLICTING_ANSWER,
     LocalRAGService,
     UNSUPPORTED_ANSWER,
     chunk_text,
@@ -69,3 +70,34 @@ def test_pdf_extraction_chunk_overlap_and_grounded_answer(app, text_pdf):
         assert isolated.response == UNSUPPORTED_ANSWER
         assert isolated.sources == []
         assert document.id is not None
+
+
+def test_conflicting_numeric_policy_claims_abstain(app, text_pdf):
+    from backend.rag import LocalRAGService
+
+    with app.app_context():
+        user = User(
+            username="conflict-user",
+            email="conflict@example.com",
+            password=generate_password_hash("password"),
+        )
+        db.session.add(user)
+        db.session.commit()
+        service = LocalRAGService(chunk_size=240, overlap=40)
+        service.index_pdf(
+            user.id,
+            BytesIO(text_pdf("The audit retention period is seven years.")),
+            "old-policy.pdf",
+        )
+        service.index_pdf(
+            user.id,
+            BytesIO(text_pdf("The audit retention period is ten years.")),
+            "new-policy.pdf",
+        )
+        db.session.commit()
+
+        answer = service.answer(user.id, "What is the audit retention period?")
+        assert answer.response == CONFLICTING_ANSWER
+        assert answer.grounding_status == "conflicting_sources"
+        assert answer.needs_escalation is True
+        assert len(answer.citations) >= 2
