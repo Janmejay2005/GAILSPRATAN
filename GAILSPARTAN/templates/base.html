@@ -18,6 +18,9 @@
             <a href="{{ url_for('documents_view') }}">Documents</a>
             <a href="{{ url_for('history') }}">History</a>
             <a href="{{ url_for('help_page') }}">Help</a>
+            {% if current_user and current_user.role in ['knowledge_admin', 'system_admin'] %}
+            <a href="{{ url_for('admin_view') }}">Admin</a>
+            {% endif %}
             <a class="nav-signout" href="{{ url_for('logout') }}">Sign out</a>
         </nav>
     </header>

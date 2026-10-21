@@ -63,7 +63,35 @@
     const emptyChat = document.getElementById('empty-chat');
     const status = document.getElementById('chat-status');
 
-    function addMessage(role, text, sources = []) {
+    async function submitFeedback(historyId, rating, sources) {
+        if (!historyId) return;
+        const response = await fetch('{{ url_for("feedback") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                chat_history_id: historyId,
+                rating,
+                category: rating === 'positive' ? 'other' : 'incomplete_answer',
+                source_ids: sources.map((source) => source.citation_id).filter(Boolean)
+            })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Feedback could not be saved.');
+        return payload;
+    }
+
+    async function submitEscalation(historyId, summary, category) {
+        const response = await fetch('{{ url_for("escalations") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ chat_history_id: historyId, summary, category, consent: true })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Escalation could not be created.');
+        return payload;
+    }
+
+    function addMessage(role, text, sources = [], metadata = {}) {
         emptyChat?.remove();
         const wrapper = document.createElement('article');
         wrapper.className = `message message-${role}`;
@@ -77,6 +105,13 @@
         body.className = 'message-body';
         body.textContent = text;
         wrapper.appendChild(body);
+
+        if (role === 'assistant' && metadata.groundingStatus) {
+            const statusPill = document.createElement('span');
+            statusPill.className = `grounding-pill grounding-${metadata.groundingStatus}`;
+            statusPill.textContent = metadata.groundingStatus.replaceAll('_', ' ');
+            wrapper.appendChild(statusPill);
+        }
 
         if (sources.length) {
             const sourceBox = document.createElement('div');
@@ -94,8 +129,51 @@
             wrapper.appendChild(sourceBox);
         }
 
+        if (role === 'assistant' && metadata.historyId) {
+            const actions = document.createElement('div');
+            actions.className = 'answer-actions';
+            ['positive', 'negative'].forEach((rating) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'button button-quiet';
+                button.textContent = rating === 'positive' ? 'Helpful' : 'Report issue';
+                button.addEventListener('click', async () => {
+                    button.disabled = true;
+                    try {
+                        await submitFeedback(metadata.historyId, rating, sources);
+                        button.textContent = 'Saved';
+                    } catch (error) {
+                        button.disabled = false;
+                        status.textContent = error.message;
+                    }
+                });
+                actions.appendChild(button);
+            });
+
+            if (metadata.needsEscalation) {
+                const escalationButton = document.createElement('button');
+                escalationButton.type = 'button';
+                escalationButton.className = 'button button-quiet';
+                escalationButton.textContent = 'Request follow-up';
+                escalationButton.addEventListener('click', async () => {
+                    const summary = window.prompt('Briefly describe what still needs to be resolved:');
+                    if (!summary) return;
+                    try {
+                        const result = await submitEscalation(metadata.historyId, summary, 'general');
+                        escalationButton.textContent = `Created ${result.reference_id}`;
+                        escalationButton.disabled = true;
+                    } catch (error) {
+                        status.textContent = error.message;
+                    }
+                });
+                actions.appendChild(escalationButton);
+            }
+            wrapper.appendChild(actions);
+        }
+
         messages.appendChild(wrapper);
         wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return wrapper;
     }
 
     async function loadHistory() {
@@ -105,7 +183,11 @@
             const history = await response.json();
             history.reverse().forEach((item) => {
                 addMessage('user', item.message);
-                addMessage('assistant', item.response);
+                addMessage('assistant', item.response, item.citations || [], {
+                    historyId: item.id,
+                    groundingStatus: item.grounding_status,
+                    needsEscalation: item.needs_escalation
+                });
             });
         } catch (error) {
             // The chat itself remains usable if history cannot be loaded.
@@ -141,7 +223,11 @@
             });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || 'The request could not be completed.');
-            addMessage('assistant', payload.response, payload.sources || []);
+            addMessage('assistant', payload.response, payload.sources || [], {
+                historyId: payload.chat_history_id,
+                groundingStatus: payload.grounding_status,
+                needsEscalation: payload.needs_escalation
+            });
             status.textContent = payload.sources?.length ? 'Answer grounded in indexed sources.' : 'No supporting source was found.';
             form.reset();
             selectedFile.textContent = 'No file selected';

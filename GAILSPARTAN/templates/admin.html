@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Admin · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">Governance overview</p>
+        <h1>Knowledge health</h1>
+        <p class="muted">Aggregate metrics only. Private document and conversation text is not shown here.</p>
+    </div>
+    <a class="button button-secondary" href="{{ url_for('documents_view') }}">Open documents</a>
+</section>
+
+<section id="metrics-grid" class="metrics-grid" aria-live="polite">
+    <p class="muted">Loading metrics...</p>
+</section>
+
+<section class="panel admin-note-panel">
+    <h2>Governance notes</h2>
+    <ul class="clean-list">
+        <li>New documents start as unverified and remain scoped to their owner.</li>
+        <li>Unsupported and conflicting questions are counted as knowledge gaps.</li>
+        <li>Use the backend review route to update document verification metadata.</li>
+    </ul>
+</section>
+
+<section class="panel admin-note-panel">
+    <div class="panel-heading-row">
+        <h2>Document review queue</h2>
+        <button id="refresh-admin-documents" class="button button-quiet" type="button">Refresh</button>
+    </div>
+    <div id="admin-document-list" class="document-list">
+        <p class="muted">Loading documents...</p>
+    </div>
+</section>
+
+<script>
+(() => {
+    const grid = document.getElementById('metrics-grid');
+    fetch('{{ url_for("admin_metrics") }}', { headers: { 'Accept': 'application/json' } })
+        .then(async (response) => {
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Could not load metrics.');
+            grid.replaceChildren();
+            const labels = [
+                ['users', 'Users'],
+                ['documents', 'Documents'],
+                ['ready_documents', 'Ready documents'],
+                ['questions', 'Questions'],
+                ['unanswered_questions', 'Knowledge gaps'],
+                ['feedback', 'Feedback reports'],
+                ['open_escalations', 'Open escalations'],
+                ['average_latency_ms', 'Average latency (ms)']
+            ];
+            labels.forEach(([key, label]) => {
+                const card = document.createElement('article');
+                card.className = 'metric-card';
+                const value = document.createElement('strong');
+                value.textContent = payload[key] ?? '0';
+                const caption = document.createElement('span');
+                caption.textContent = label;
+                card.append(value, caption);
+                grid.appendChild(card);
+            });
+        })
+        .catch((error) => {
+            grid.replaceChildren();
+            const alert = document.createElement('p');
+            alert.className = 'alert alert-error';
+            alert.textContent = error.message;
+            grid.appendChild(alert);
+        });
+})();
+</script>
+<script>
+(() => {
+    const list = document.getElementById('admin-document-list');
+    async function loadDocuments() {
+        const response = await fetch('{{ url_for("admin_documents") }}', { headers: { 'Accept': 'application/json' } });
+        const documents = await response.json();
+        if (!response.ok) throw new Error(documents.error || 'Could not load documents.');
+        list.replaceChildren();
+        if (!documents.length) {
+            const empty = document.createElement('p');
+            empty.className = 'empty-copy';
+            empty.textContent = 'No documents have been indexed.';
+            list.appendChild(empty);
+            return;
+        }
+        documents.forEach((item) => {
+            const card = document.createElement('article');
+            card.className = 'document-item';
+            const title = document.createElement('h3');
+            title.textContent = item.title || item.filename;
+            const meta = document.createElement('p');
+            meta.className = 'muted';
+            meta.textContent = `${item.filename} · owner ${item.owner_id} · ${item.category} · v${item.version}`;
+            const controls = document.createElement('div');
+            controls.className = 'document-actions';
+            const status = document.createElement('select');
+            ['unverified', 'verified', 'outdated', 'archived', 'failed'].forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                option.selected = value === item.verification_status;
+                status.appendChild(option);
+            });
+            const save = document.createElement('button');
+            save.type = 'button';
+            save.className = 'button button-quiet';
+            save.textContent = 'Save status';
+            save.addEventListener('click', async () => {
+                save.disabled = true;
+                const update = await fetch(`/admin/documents/${item.id}/review`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ verification_status: status.value })
+                });
+                const payload = await update.json();
+                save.disabled = false;
+                save.textContent = update.ok ? 'Saved' : (payload.error || 'Failed');
+            });
+            controls.append(status, save);
+            card.append(title, meta, controls);
+            list.appendChild(card);
+        });
+    }
+    document.getElementById('refresh-admin-documents').addEventListener('click', () => loadDocuments().catch((error) => { list.textContent = error.message; }));
+    loadDocuments().catch((error) => { list.textContent = error.message; });
+})();
+</script>
+{% endblock %}

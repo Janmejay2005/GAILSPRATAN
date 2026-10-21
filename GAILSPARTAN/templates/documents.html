@@ -12,12 +12,26 @@
 
 <section class="content-grid">
     <div class="panel">
-        <h2>Index a PDF</h2>
-        <p class="muted">Upload a text-based PDF to add it to your private local knowledge base.</p>
+        <h2>Index a document</h2>
+        <p class="muted">Upload a text-based PDF or UTF-8 TXT file to add it to your private local knowledge base.</p>
         <form id="document-form" class="stack-form" enctype="multipart/form-data">
             <div class="field-group">
-                <label for="document-file">PDF file</label>
-                <input id="document-file" name="pdf_file" type="file" accept="application/pdf,.pdf" required>
+                <label for="document-file">PDF or TXT file</label>
+                <input id="document-file" name="pdf_file" type="file" accept="application/pdf,.pdf,text/plain,.txt" required>
+            </div>
+            <div class="field-group">
+                <label for="document-title">Title (optional)</label>
+                <input id="document-title" name="title" type="text" maxlength="255" placeholder="Leave blank to use the filename">
+            </div>
+            <div class="metadata-fields">
+                <div class="field-group">
+                    <label for="document-category">Category</label>
+                    <input id="document-category" name="category" type="text" maxlength="80" value="general">
+                </div>
+                <div class="field-group">
+                    <label for="document-version">Version</label>
+                    <input id="document-version" name="version" type="text" maxlength="64" value="1.0">
+                </div>
             </div>
             <button class="button button-primary" type="submit">Index document</button>
         </form>
@@ -58,11 +72,41 @@
                 const card = document.createElement('article');
                 card.className = 'document-item';
                 const title = document.createElement('h3');
-                title.textContent = item.filename;
+                title.textContent = item.title || item.filename;
                 const metadata = document.createElement('p');
                 metadata.className = 'muted';
-                metadata.textContent = `${item.chunk_count} indexed chunk${item.chunk_count === 1 ? '' : 's'}`;
-                card.append(title, metadata);
+                metadata.textContent = `${item.filename} · ${item.chunk_count} indexed chunk${item.chunk_count === 1 ? '' : 's'}`;
+                const statusBadge = document.createElement('span');
+                statusBadge.className = 'status-badge';
+                statusBadge.textContent = `${item.verification_status || 'unverified'} · v${item.version || '1.0'}`;
+                const actionRow = document.createElement('div');
+                actionRow.className = 'document-actions';
+
+                const summaryButton = document.createElement('button');
+                summaryButton.type = 'button';
+                summaryButton.className = 'button button-quiet';
+                summaryButton.textContent = 'Summary';
+                summaryButton.addEventListener('click', async () => {
+                    const response = await fetch(`/documents/${item.id}/summarize`, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                    const payload = await response.json();
+                    if (!response.ok) { status.textContent = payload.error || 'Summary unavailable.'; return; }
+                    status.textContent = payload.summary;
+                });
+
+                const deleteButton = document.createElement('button');
+                deleteButton.type = 'button';
+                deleteButton.className = 'button button-quiet button-danger';
+                deleteButton.textContent = 'Delete';
+                deleteButton.addEventListener('click', async () => {
+                    if (!window.confirm(`Delete ${item.filename}?`)) return;
+                    const response = await fetch(`/documents/${item.id}`, { method: 'DELETE', headers: { 'Accept': 'application/json' } });
+                    const payload = await response.json();
+                    if (!response.ok) { status.textContent = payload.error || 'Delete failed.'; return; }
+                    await loadDocuments();
+                });
+
+                actionRow.append(summaryButton, deleteButton);
+                card.append(title, metadata, statusBadge, actionRow);
                 list.appendChild(card);
             });
         } catch (error) {
@@ -77,13 +121,11 @@
     form.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (!fileInput.files.length) return;
-        const data = new FormData();
-        data.append('message', 'Index this document.');
-        data.append('pdf_file', fileInput.files[0]);
+        const data = new FormData(form);
         status.textContent = 'Extracting and indexing...';
         form.querySelector('button[type="submit"]').disabled = true;
         try {
-            const response = await fetch('{{ url_for("chat") }}', { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
+            const response = await fetch('{{ url_for("documents") }}', { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || 'The document could not be indexed.');
             status.textContent = 'Document indexed successfully.';
