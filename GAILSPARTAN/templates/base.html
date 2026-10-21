@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}GAILSPARTAN{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    {% if session.get('user_id') %}
+    <header class="app-header">
+        <a class="brand" href="{{ url_for('chat') }}" aria-label="GAILSPARTAN home">
+            <span class="brand-mark">G</span>
+            <span>GAILSPARTAN</span>
+        </a>
+        <nav class="main-nav" aria-label="Main navigation">
+            <a href="{{ url_for('chat') }}">Chat</a>
+            <a href="{{ url_for('documents_view') }}">Documents</a>
+            <a href="{{ url_for('history') }}">History</a>
+            <a href="{{ url_for('help_page') }}">Help</a>
+            <a class="nav-signout" href="{{ url_for('logout') }}">Sign out</a>
+        </nav>
+    </header>
+    {% endif %}
+
+    <main class="page-shell{% if not session.get('user_id') %} page-shell-public{% endif %}">
+        {% if error %}
+        <div class="alert alert-error" role="alert">{{ error }}</div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+        <span>GAILSPARTAN</span>
+        <span>Local, source-grounded document assistance</span>
+    </footer>
+</body>
+</html>

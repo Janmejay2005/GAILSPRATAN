@@ -1,24 +1,159 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Chat</title> 
-    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <h2>GAILSPARTAN</h2>
-    <div class="chat-container">
-        <div id="chat-response"></div>
-        <div class="chat-input">
-            <input type="text" id="user-message" required>
-            <button type="submit" id="send-button">Ask</button>
-        </div>
+{% extends "base.html" %}
+{% block title %}Chat · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">Local retrieval workspace</p>
+        <h1>Ask GAILSPARTAN</h1>
+        <p class="muted">Answers are extracted from the PDFs you index. If the evidence is missing, GAILSPARTAN will say so.</p>
     </div>
-    <script>
-        document.getElementById('send-button').addEventListener('click', function(event) {
-            event.preventDefault();
-            const userMessage = document.getElementById('user-message').value;
-            // ... (rest of the JavaScript code from the previous response)
+    <a class="button button-secondary" href="{{ url_for('documents_view') }}">Manage documents</a>
+</section>
+
+<section class="chat-layout" aria-label="GAILSPARTAN chat">
+    <div class="conversation-card">
+        <div id="chat-messages" class="message-list" aria-live="polite">
+            <div id="empty-chat" class="empty-state">
+                <div class="empty-icon">✦</div>
+                <h2>Start with a document question</h2>
+                <p>Upload a PDF with your question, or ask about a document you have already indexed.</p>
+                <div class="example-prompts">
+                    <button type="button" class="prompt-chip" data-prompt="What is the main purpose of this document?">Summarize the purpose</button>
+                    <button type="button" class="prompt-chip" data-prompt="What deadlines or requirements are mentioned?">Find requirements</button>
+                </div>
+            </div>
+        </div>
+
+        <form id="chat-form" class="composer" enctype="multipart/form-data">
+            <label class="sr-only" for="user-message">Your question</label>
+            <textarea id="user-message" name="message" rows="3" placeholder="Ask a question about your indexed documents..." required></textarea>
+            <div class="composer-actions">
+                <label class="file-picker" for="pdf-file">
+                    <span aria-hidden="true">＋</span> Attach PDF
+                    <input id="pdf-file" type="file" name="pdf_file" accept="application/pdf,.pdf">
+                </label>
+                <span id="selected-file" class="file-name">No file selected</span>
+                <button id="send-button" class="button button-primary" type="submit">Ask GAILSPARTAN</button>
+            </div>
+        </form>
+        <div id="chat-status" class="status-line" role="status" aria-live="polite"></div>
+    </div>
+
+    <aside class="side-card">
+        <h2>How grounding works</h2>
+        <ol class="steps-list">
+            <li><span>1</span><p>Upload a text-based PDF.</p></li>
+            <li><span>2</span><p>GAILSPARTAN extracts and chunks its text locally.</p></li>
+            <li><span>3</span><p>Your question is matched to the best document passages.</p></li>
+            <li><span>4</span><p>The response shows the source filename and page.</p></li>
+        </ol>
+        <div class="notice notice-warning">
+            Scanned image-only PDFs may require OCR and may not produce an answer.
+        </div>
+    </aside>
+</section>
+
+<script>
+(() => {
+    const form = document.getElementById('chat-form');
+    const messageInput = document.getElementById('user-message');
+    const fileInput = document.getElementById('pdf-file');
+    const selectedFile = document.getElementById('selected-file');
+    const messages = document.getElementById('chat-messages');
+    const emptyChat = document.getElementById('empty-chat');
+    const status = document.getElementById('chat-status');
+
+    function addMessage(role, text, sources = []) {
+        emptyChat?.remove();
+        const wrapper = document.createElement('article');
+        wrapper.className = `message message-${role}`;
+
+        const label = document.createElement('div');
+        label.className = 'message-label';
+        label.textContent = role === 'user' ? 'You' : 'GAILSPARTAN';
+        wrapper.appendChild(label);
+
+        const body = document.createElement('p');
+        body.className = 'message-body';
+        body.textContent = text;
+        wrapper.appendChild(body);
+
+        if (sources.length) {
+            const sourceBox = document.createElement('div');
+            sourceBox.className = 'source-list';
+            const heading = document.createElement('strong');
+            heading.textContent = 'Sources';
+            sourceBox.appendChild(heading);
+            sources.forEach((source) => {
+                const sourceItem = document.createElement('span');
+                sourceItem.className = 'source-pill';
+                const page = source.page_number ?? source.page;
+                sourceItem.textContent = page ? `${source.filename} · page ${page}` : source.filename;
+                sourceBox.appendChild(sourceItem);
+            });
+            wrapper.appendChild(sourceBox);
+        }
+
+        messages.appendChild(wrapper);
+        wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    async function loadHistory() {
+        try {
+            const response = await fetch('{{ url_for("get_chat_history") }}', { headers: { 'Accept': 'application/json' } });
+            if (!response.ok) return;
+            const history = await response.json();
+            history.reverse().forEach((item) => {
+                addMessage('user', item.message);
+                addMessage('assistant', item.response);
+            });
+        } catch (error) {
+            // The chat itself remains usable if history cannot be loaded.
+        }
+    }
+
+    fileInput.addEventListener('change', () => {
+        selectedFile.textContent = fileInput.files.length ? fileInput.files[0].name : 'No file selected';
+    });
+
+    document.querySelectorAll('[data-prompt]').forEach((button) => {
+        button.addEventListener('click', () => {
+            messageInput.value = button.dataset.prompt;
+            messageInput.focus();
         });
-    </script>
-</body>
-</html>
+    });
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        const formData = new FormData(form);
+        addMessage('user', message);
+        status.textContent = 'Indexing and retrieving evidence...';
+        form.querySelector('button[type="submit"]').disabled = true;
+
+        try {
+            const response = await fetch('{{ url_for("chat") }}', {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'The request could not be completed.');
+            addMessage('assistant', payload.response, payload.sources || []);
+            status.textContent = payload.sources?.length ? 'Answer grounded in indexed sources.' : 'No supporting source was found.';
+            form.reset();
+            selectedFile.textContent = 'No file selected';
+        } catch (error) {
+            addMessage('assistant', `I could not complete that request: ${error.message}`);
+            status.textContent = 'Request failed. Check the message and uploaded file, then try again.';
+        } finally {
+            form.querySelector('button[type="submit"]').disabled = false;
+        }
+    });
+
+    loadHistory();
+})();
+</script>
+{% endblock %}

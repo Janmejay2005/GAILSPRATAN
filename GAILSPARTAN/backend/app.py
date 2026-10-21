@@ -1,201 +1,294 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_mail import Mail, Message
-import random
-import openai
-from io import StringIO
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.converter import TextConverter
-from pdfminer.layout import LAParams
-from pdfminer.pdfpage import PDFPage
+"""Flask backend for the API-free local GAILSPARTAN RAG MVP."""
 
-# This is a simple flask application 
+from __future__ import annotations
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'  # Replace with a strong secret key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chatbot.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+import os
+from pathlib import Path
+import re
+from typing import Any
 
-# Email configuration
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = 'your_email@gmail.com'
-app.config['MAIL_PASSWORD'] = 'your_email_password'
-mail = Mail(app)
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from sqlalchemy.exc import IntegrityError
+from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 
-# OpenAI API key
-openai.api_key = 'your_openai_api_key'
+try:  # Support both ``python -m backend.app`` and ``python backend/app.py``.
+    from .extensions import db
+    from .models import ChatHistory, Document, User
+    from .rag import LocalRAGService
+except ImportError:  # pragma: no cover - exercised only for direct script use.
+    from extensions import db
+    from models import ChatHistory, Document, User
+    from rag import LocalRAGService
 
-# Gemini api key
-GEMINI_API_KEY  = 'your_gemini_api_key'
 
-#SerpAPI Key
-SERPAPI_API_KEY = 'your_serpapi_key'
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DATABASE_PATH = PROJECT_ROOT / "chatbot.db"
+FALLBACK_DATABASE_PATH = PROJECT_ROOT / "chatbot.sqlite3"
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-# Database models
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    verification_code = db.Column(db.String(6), nullable=True)
 
-# This for keeping the record of the old chats as openai and gemini Do 
+def _default_database_uri() -> str:
+    # The repository's historical ``chatbot.db`` artifact is not a SQLite
+    # file. Preserve it and use a real local SQLite file until a user provides
+    # a valid database path through the app configuration.
+    database_path = DEFAULT_DATABASE_PATH
+    if database_path.exists():
+        try:
+            with database_path.open("rb") as database_file:
+                if database_file.read(16) != b"SQLite format 3\x00":
+                    database_path = FALLBACK_DATABASE_PATH
+        except OSError:
+            database_path = FALLBACK_DATABASE_PATH
+    return f"sqlite:///{database_path.as_posix()}"
 
-class ChatHistory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    message = db.Column(db.Text, nullable=False)
-    response = db.Column(db.Text, nullable=False)
-    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp(), nullable=False)
 
-db.create_all()
+def _error_response(message: str, template: str, status: int):
+    if request.is_json or request.accept_mimetypes.best == "application/json":
+        return jsonify({"error": message}), status
+    return render_template(template, error=message), status
 
-# PDF text extraction function
-def extract_text_from_pdf(pdf_file):
-    resource_manager = PDFResourceManager()
-    ret_str = StringIO()
-    laparams = LAParams()
-    device = TextConverter(resource_manager, ret_str, laparams=laparams)
-    interpreter = PDFPageInterpreter(resource_manager, device)
 
-    for page in PDFPage.get_pages(pdf_file):
-        interpreter.process_page(page)
+def _unauthorized_response(json_response: bool = False):
+    if json_response:
+        return jsonify({"error": "Unauthorized"}), 401
+    return redirect(url_for("login"))
 
-    text = ret_str.getvalue()
-    device.close()
-    ret_str.close()
-    return text
 
-# Routes
-@app.route('/')
-def home():
-    return render_template('login.html')
+def _valid_registration_input(username: str, email: str, password: str) -> str | None:
+    if not username or not email or not password:
+        return "Username, email, and password are required."
+    if len(username) > 80 or any(character.isspace() for character in username):
+        return "Username must be 80 characters or fewer and contain no spaces."
+    if not _EMAIL_PATTERN.fullmatch(email):
+        return "Enter a valid email address."
+    if len(email) > 255:
+        return "Email must be 255 characters or fewer."
+    return None
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = generate_password_hash(request.form['password'])
-        email = request.form['email']
-        user = User(username=username, password=password, email=email)
+
+def create_app(test_config: dict[str, Any] | None = None) -> Flask:
+    """Create a configured Flask app and initialize its database in context."""
+
+    app = Flask(
+        __name__,
+        template_folder=str(PROJECT_ROOT / "templates"),
+        static_folder=str(PROJECT_ROOT / "static"),
+    )
+    app.config.from_mapping(
+        SECRET_KEY=os.environ.get("SECRET_KEY", "gailspratan-local-dev-key"),
+        SQLALCHEMY_DATABASE_URI=_default_database_uri(),
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        MAX_CONTENT_LENGTH=10 * 1024 * 1024,
+        RAG_CHUNK_SIZE=1000,
+        RAG_CHUNK_OVERLAP=150,
+        RAG_TOP_K=5,
+    )
+    if test_config:
+        app.config.update(test_config)
+
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+
+    rag_service = LocalRAGService(
+        chunk_size=app.config["RAG_CHUNK_SIZE"],
+        overlap=app.config["RAG_CHUNK_OVERLAP"],
+    )
+
+    @app.route("/")
+    def home():
+        if session.get("user_id"):
+            return redirect(url_for("chat"))
+        return render_template("login.html")
+
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        if request.method == "GET":
+            return render_template("register.html")
+
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        validation_error = _valid_registration_input(username, email, password)
+        if validation_error:
+            return _error_response(validation_error, "register.html", 400)
+
+        duplicate = User.query.filter(
+            (User.username == username) | (User.email == email)
+        ).first()
+        if duplicate:
+            return _error_response(
+                "Username or email is already registered.",
+                "register.html",
+                409,
+            )
+
+        user = User(
+            username=username,
+            email=email,
+            password=generate_password_hash(password),
+        )
         db.session.add(user)
-        db.session.commit()
-        return redirect(url_for('login'))
-    return render_template('register.html')
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return _error_response(
+                "Username or email is already registered.",
+                "register.html",
+                409,
+            )
+        return redirect(url_for("login"))
 
-# This set of codes is for api working or you can say routes
-@app.route('/search', methods=['GET'])
-def search():
-    query = request.args.get('query')
-    url = f"https://serpapi.com/search?q={query}&api_key={SERPAPI_KEY}"
-    response = requests.get(url)
-    return jsonify(response.json())
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        if request.method == "GET":
+            return render_template("login.html")
 
-@app.route('/gemini', methods=['POST'])
-def gemini():
-    data = request.json
-    headers = {
-        'Authorization': f'Bearer {GEMINI_API_KEY}',
-        'Content-Type': 'application/json'
-    }
-    response = requests.post('https://api.gemini.com/v1/some_endpoint', headers=headers, json=data)
-    return jsonify(response.json())
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if not username or not password:
+            return _error_response(
+                "Username and password are required.",
+                "login.html",
+                400,
+            )
 
-@app.route('/openai', methods=['POST'])
-def openai_api():
-    prompt = request.json.get('prompt')
-    response = openai.Completion.create(
-        engine="davinci-codex",
-        prompt=prompt,
-        max_tokens=100
-    )
-    return jsonify(response.choices[0].text)
-
-
-# This is for the  login functionality
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
         user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password, password):
-            session['user_id'] = user.id
-            session['username'] = user.username
-            # Generate and send verification code
-            verification_code = str(random.randint(100000, 999999))
-            user.verification_code = verification_code
+        if user is None or not check_password_hash(user.password, password):
+            return _error_response("Invalid username or password.", "login.html", 401)
+
+        session.clear()
+        session["user_id"] = user.id
+        session["username"] = user.username
+        return redirect(url_for("chat"))
+
+    @app.route("/logout", methods=["GET", "POST"])
+    def logout():
+        session.clear()
+        return redirect(url_for("login"))
+
+    @app.route("/chat", methods=["GET", "POST"])
+    def chat():
+        user_id = session.get("user_id")
+        if not user_id:
+            return _unauthorized_response(json_response=request.method == "POST")
+
+        if request.method == "GET":
+            return render_template("chat.html")
+
+        message = request.form.get("message", "").strip()
+        if not message:
+            return jsonify({"error": "Message is required."}), 400
+
+        uploaded_file = request.files.get("pdf_file")
+        if uploaded_file is not None and uploaded_file.filename:
+            filename = secure_filename(uploaded_file.filename) or "uploaded.pdf"
+            if not filename.lower().endswith(".pdf"):
+                return jsonify({"error": "Only PDF files can be indexed."}), 400
+        else:
+            filename = ""
+
+        try:
+            if filename:
+                rag_service.index_pdf(user_id, uploaded_file, filename)
+            result = rag_service.answer(
+                user_id,
+                message,
+                top_k=app.config["RAG_TOP_K"],
+            )
+            db.session.add(
+                ChatHistory(
+                    user_id=user_id,
+                    message=message,
+                    response=result.response,
+                )
+            )
             db.session.commit()
-            send_verification_email(user.email, verification_code)
-            return redirect(url_for('verify'))
-        return 'Invalid username or password'
-    return render_template('login.html')
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            db.session.rollback()
+            raise
 
-@app.route('/verify', methods=['GET', 'POST'])
-def verify():
-    if request.method == 'POST':
-        code = request.form['code']
-        user = User.query.get(session['user_id'])
-        if user and user.verification_code == code:
-            user.verification_code = None
-            db.session.commit()
-            return redirect(url_for('chat'))
-        return 'Invalid verification code'
-    return render_template('verify.html')
+        return jsonify({"response": result.response, "sources": result.sources})
 
-@app.route('/chat', methods=['GET', 'POST'])
-def chat():
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    
-    if request.method == 'POST':
-        user_message = request.form['message']
-        user_id = session['user_id']
+    @app.route("/get_chat_history", methods=["GET"])
+    def get_chat_history():
+        user_id = session.get("user_id")
+        if not user_id:
+            return _unauthorized_response(json_response=True)
 
-        # Check if a PDF file was uploaded
-        if 'pdf_file' in request.files:
-            pdf_file = request.files['pdf_file']
-            if pdf_file.filename != '':
-                pdf_text = extract_text_from_pdf(pdf_file)
-                user_message += f"\n\nExtracted PDF content:\n{pdf_text}"
+        history = (
+            ChatHistory.query.filter_by(user_id=user_id)
+            .order_by(ChatHistory.timestamp.desc(), ChatHistory.id.desc())
+            .limit(10)
+            .all()
+        )
+        return jsonify(
+            [
+                {
+                    "id": item.id,
+                    "message": item.message,
+                    "response": item.response,
+                    "timestamp": item.timestamp.isoformat()
+                    if item.timestamp is not None
+                    else None,
+                }
+                for item in history
+            ]
+        )
 
-        response = generate_response(user_message)
+    @app.route("/documents", methods=["GET"])
+    def documents():
+        user_id = session.get("user_id")
+        if not user_id:
+            return _unauthorized_response(json_response=True)
 
-        # Save chat history
-        chat_history = ChatHistory(user_id=user_id, message=user_message, response=response)
-        db.session.add(chat_history)
-        db.session.commit()
+        indexed_documents = (
+            Document.query.filter_by(user_id=user_id)
+            .order_by(Document.created_at.desc(), Document.id.desc())
+            .all()
+        )
+        return jsonify(
+            [
+                {
+                    "id": document.id,
+                    "filename": document.filename,
+                    "created_at": document.created_at.isoformat()
+                    if document.created_at is not None
+                    else None,
+                    "chunk_count": len(document.chunks),
+                }
+                for document in indexed_documents
+            ]
+        )
 
-        return jsonify({'response': response})
+    @app.route("/documents/view", methods=["GET"])
+    def documents_view():
+        if not session.get("user_id"):
+            return _unauthorized_response()
+        return render_template("documents.html")
 
-    return render_template('chat.html')
+    @app.route("/history", methods=["GET"])
+    def history():
+        if not session.get("user_id"):
+            return _unauthorized_response()
+        return render_template("history.html")
 
-@app.route('/get_chat_history')
-def get_chat_history():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    user_id = session['user_id']
-    history = ChatHistory.query.filter_by(user_id=user_id).order_by(ChatHistory.timestamp.desc()).limit(10).all()
-    history_list = [{'message': h.message, 'response': h.response, 'timestamp': h.timestamp.isoformat()} for h in history]
-    return jsonify(history_list)
+    @app.route("/help", methods=["GET"])
+    def help_page():
+        return render_template("help.html")
 
-def generate_response(message):
-    response = openai.Completion.create(
-        model="text-davinci-003",
-        prompt=message,
-        max_tokens=150
-    )
-    return response.choices[0].text.strip()
+    return app
 
-def send_verification_email(email, code):
-    msg = Message('Your Verification Code', sender='noreply@example.com', recipients=[email])
-    msg.body = f'Your verification code is {code}'
-    mail.send(msg)
 
-if __name__ == '__main__':
+# Preserve the original module-level Flask entry point while keeping all
+# initialization inside create_app's application context.
+app = create_app()
+
+
+if __name__ == "__main__":  # pragma: no cover - manual server entry point.
     app.run(debug=True)

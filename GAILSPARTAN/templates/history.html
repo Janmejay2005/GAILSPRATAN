@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}History · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">Your workspace</p>
+        <h1>Conversation history</h1>
+        <p class="muted">Recent questions and answers saved to your local account.</p>
+    </div>
+    <a class="button button-primary" href="{{ url_for('chat') }}">New question</a>
+</section>
+
+<section class="panel">
+    <div id="history-list" class="history-list">
+        <p class="muted">Loading history...</p>
+    </div>
+</section>
+
+<script>
+(() => {
+    const list = document.getElementById('history-list');
+    fetch('{{ url_for("get_chat_history") }}', { headers: { 'Accept': 'application/json' } })
+        .then(async (response) => {
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'Could not load history.');
+            list.replaceChildren();
+            if (!payload.length) {
+                const empty = document.createElement('p');
+                empty.className = 'empty-copy';
+                empty.textContent = 'No conversations yet. Ask your first document question.';
+                list.appendChild(empty);
+                return;
+            }
+            payload.forEach((item) => {
+                const card = document.createElement('article');
+                card.className = 'history-item';
+                const question = document.createElement('h2');
+                question.textContent = item.message;
+                const answer = document.createElement('p');
+                answer.textContent = item.response;
+                const timestamp = document.createElement('time');
+                timestamp.className = 'muted small-text';
+                timestamp.textContent = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
+                card.append(question, answer, timestamp);
+                list.appendChild(card);
+            });
+        })
+        .catch((error) => {
+            list.replaceChildren();
+            const alert = document.createElement('p');
+            alert.className = 'alert alert-error';
+            alert.textContent = error.message;
+            list.appendChild(alert);
+        });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Documents · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">Knowledge base</p>
+        <h1>Your indexed documents</h1>
+        <p class="muted">Documents stay scoped to your account and are searched locally.</p>
+    </div>
+    <a class="button button-primary" href="{{ url_for('chat') }}">Ask a question</a>
+</section>
+
+<section class="content-grid">
+    <div class="panel">
+        <h2>Index a PDF</h2>
+        <p class="muted">Upload a text-based PDF to add it to your private local knowledge base.</p>
+        <form id="document-form" class="stack-form" enctype="multipart/form-data">
+            <div class="field-group">
+                <label for="document-file">PDF file</label>
+                <input id="document-file" name="pdf_file" type="file" accept="application/pdf,.pdf" required>
+            </div>
+            <button class="button button-primary" type="submit">Index document</button>
+        </form>
+        <div id="document-status" class="status-line" role="status" aria-live="polite"></div>
+    </div>
+    <div class="panel">
+        <div class="panel-heading-row">
+            <h2>Indexed files</h2>
+            <button id="refresh-documents" class="button button-quiet" type="button">Refresh</button>
+        </div>
+        <div id="document-list" class="document-list">
+            <p class="muted">Loading documents...</p>
+        </div>
+    </div>
+</section>
+
+<script>
+(() => {
+    const form = document.getElementById('document-form');
+    const fileInput = document.getElementById('document-file');
+    const status = document.getElementById('document-status');
+    const list = document.getElementById('document-list');
+
+    async function loadDocuments() {
+        try {
+            const response = await fetch('{{ url_for("documents") }}', { headers: { 'Accept': 'application/json' } });
+            const documents = await response.json();
+            if (!response.ok) throw new Error(documents.error || 'Could not load documents.');
+            list.replaceChildren();
+            if (!documents.length) {
+                const empty = document.createElement('p');
+                empty.className = 'empty-copy';
+                empty.textContent = 'No documents indexed yet.';
+                list.appendChild(empty);
+                return;
+            }
+            documents.forEach((item) => {
+                const card = document.createElement('article');
+                card.className = 'document-item';
+                const title = document.createElement('h3');
+                title.textContent = item.filename;
+                const metadata = document.createElement('p');
+                metadata.className = 'muted';
+                metadata.textContent = `${item.chunk_count} indexed chunk${item.chunk_count === 1 ? '' : 's'}`;
+                card.append(title, metadata);
+                list.appendChild(card);
+            });
+        } catch (error) {
+            list.replaceChildren();
+            const alert = document.createElement('p');
+            alert.className = 'alert alert-error';
+            alert.textContent = error.message;
+            list.appendChild(alert);
+        }
+    }
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!fileInput.files.length) return;
+        const data = new FormData();
+        data.append('message', 'Index this document.');
+        data.append('pdf_file', fileInput.files[0]);
+        status.textContent = 'Extracting and indexing...';
+        form.querySelector('button[type="submit"]').disabled = true;
+        try {
+            const response = await fetch('{{ url_for("chat") }}', { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || 'The document could not be indexed.');
+            status.textContent = 'Document indexed successfully.';
+            form.reset();
+            await loadDocuments();
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            form.querySelector('button[type="submit"]').disabled = false;
+        }
+    });
+
+    document.getElementById('refresh-documents').addEventListener('click', loadDocuments);
+    loadDocuments();
+})();
+</script>
+{% endblock %}

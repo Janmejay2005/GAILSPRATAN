@@ -1,17 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <h1>GAILSPARTAN</h1>
-    <form action="/login" method="post">
-        <label for="username">Username:</label>
-        <input type="text" id="username" name="username" required><br>
-        <label for="password">Password:</label>
-        <input type="password" id="password" name="password" required><br>
-        <button type="submit">Login</button>
-    </form>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Sign in · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="auth-layout">
+    <div class="auth-panel intro-panel">
+        <p class="eyebrow">Private knowledge workspace</p>
+        <h1>Ask your documents, not the internet.</h1>
+        <p class="muted">
+            GAILSPARTAN indexes your uploaded PDFs locally and answers from the
+            evidence it can retrieve. No external AI or search API is required.
+        </p>
+        <div class="notice notice-info">
+            <strong>Demo notice</strong>
+            <span>Use public sample documents only. Do not upload confidential or regulated information.</span>
+        </div>
+    </div>
+
+    <div class="auth-panel form-panel">
+        <p class="eyebrow">Welcome back</p>
+        <h2>Sign in to GAILSPARTAN</h2>
+        <form action="{{ url_for('login') }}" method="post" class="stack-form">
+            <div class="field-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" autocomplete="username" required>
+            </div>
+            <div class="field-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button class="button button-primary" type="submit">Sign in</button>
+        </form>
+        <p class="form-footer">New to GAILSPARTAN? <a href="{{ url_for('register') }}">Create an account</a></p>
+    </div>
+</section>
+{% endblock %}

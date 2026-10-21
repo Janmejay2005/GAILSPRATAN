@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Help · GAILSPARTAN{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">Guidance and safety</p>
+        <h1>Using GAILSPARTAN</h1>
+        <p class="muted">A short guide to getting useful, source-grounded answers.</p>
+    </div>
+</section>
+
+<section class="content-grid help-grid">
+    <article class="panel">
+        <h2>Ask better questions</h2>
+        <ul class="clean-list">
+            <li>Ask about a specific policy, deadline, process, or requirement.</li>
+            <li>Upload the relevant PDF with the question when it is not indexed yet.</li>
+            <li>Open the source information shown under an answer before acting on it.</li>
+        </ul>
+    </article>
+    <article class="panel">
+        <h2>Know the limits</h2>
+        <ul class="clean-list">
+            <li>GAILSPARTAN does not browse the web or call external AI services.</li>
+            <li>Image-only PDFs may need OCR and may not be searchable.</li>
+            <li>If no evidence is found, confirm the policy with the responsible team.</li>
+        </ul>
+    </article>
+    <article class="panel panel-wide">
+        <h2>Privacy and demo data</h2>
+        <p class="muted">This version is designed for local development and public sample documents. Keep confidential, personal, regulated, and production organizational data out of the demo.</p>
+    </article>
+</section>
+{% endblock %}
