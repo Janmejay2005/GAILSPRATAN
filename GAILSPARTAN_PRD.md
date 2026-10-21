@@ -6,6 +6,12 @@
 **Product type:** Web-based AI knowledge assistant\
 **Product name:** GAILSPARTAN
 
+**Repository implementation note:** The current repository implements an
+API-free local MVP. It uses Flask, SQLite, `pdfminer.six`, and deterministic
+extractive TF-IDF retrieval. Hosted AI, web-search, email, managed
+authentication, and external connector integrations are intentionally deferred
+until a separate security and deployment decision is made.
+
 ## 1. Executive Summary
 
 GAILSPARTAN is a secure, source-grounded employee knowledge assistant
@@ -194,7 +200,9 @@ organization.
 -   Extract text and preserve page or section metadata where possible.
 -   Chunk text with overlap and retain document ID, title, page/section,
     version, owner, access scope, and ingestion timestamp.
--   Create embeddings and index chunks.
+-   Create embeddings and index chunks when an approved local/vector backend is
+    available. The current MVP uses a deterministic TF-IDF/cosine-style
+    baseline instead of external embeddings.
 -   Make indexing asynchronous so a large file does not block the web
     request.
 -   Show processing status and allow retry after recoverable failures.
@@ -386,8 +394,9 @@ admins unless explicitly required and disclosed.
 
 ### Models
 
--   Use a low-latency hosted model API for the first working version if
-    budget and data policy permit.
+-   The current repository uses extractive local answers and no model API. A
+    hosted or local generative model can be evaluated later behind a
+    provider-neutral interface if budget and data policy permit.
 -   Keep the model interface provider-agnostic.
 -   Use a small embedding model such as `BAAI/bge-small-en-v1.5` or
     `sentence-transformers/all-MiniLM-L6-v2` as a benchmark baseline.
@@ -535,7 +544,8 @@ data.
 
 -   Extract PDF/DOCX text.
 -   Chunk text and retain page/section metadata.
--   Generate embeddings and index chunks.
+-   Index chunks with the current local TF-IDF baseline; evaluate embeddings
+    separately before adding them.
 -   Implement retrieval, answer generation, citation mapping, and
     abstention.
 -   Add document-scoped summarization and keyword extraction.

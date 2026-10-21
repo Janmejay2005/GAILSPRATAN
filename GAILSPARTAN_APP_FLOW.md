@@ -5,6 +5,11 @@
 **Purpose:** UX flows, navigation, and end-to-end system behavior for
 the MVP.
 
+**Repository implementation note:** The current MVP is API-free. Retrieval,
+summaries, citations, feedback, and demo escalation run through the local
+Flask application and SQLite database; no external model, search, email, or
+ticketing service is called.
+
 ## 1. Navigation Map
 
 ``` text
@@ -159,7 +164,7 @@ flowchart TD
     I --> J{Text extracted?}
     J -- No --> K[Mark failed or OCR required]
     J -- Yes --> L[Chunk and attach metadata]
-    L --> M[Generate embeddings]
+    L --> M[Build local TF-IDF index]
     M --> N[Write chunks to authorized index]
     N --> O[Mark document ready]
     O --> P[Show summary and Ask about document]

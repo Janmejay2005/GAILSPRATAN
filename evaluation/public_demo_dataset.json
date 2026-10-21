@@ -1,0 +1,53 @@
+{
+  "dataset_type": "public-demo",
+  "name": "GAILSPARTAN sample knowledge baseline",
+  "version": "1.0.0",
+  "description": "Small public, synthetic policy passages for deterministic local retrieval evaluation.",
+  "documents": [
+    {
+      "id": "leave-policy",
+      "filename": "sample-leave-policy.pdf",
+      "passage": "Employees should submit planned leave through the leave portal at least seven days before the first day away. Emergency leave should be reported to the manager as soon as practical."
+    },
+    {
+      "id": "it-guide",
+      "filename": "sample-it-support-guide.pdf",
+      "passage": "For an account lockout, contact the service desk and include your employee identifier. The service desk reviews standard access requests during business hours."
+    },
+    {
+      "id": "travel-policy",
+      "filename": "sample-travel-policy.pdf",
+      "passage": "Travel requests should include the destination, business purpose, and estimated cost. Submit the request before booking transportation or lodging."
+    }
+  ],
+  "questions": [
+    {
+      "id": "leave-deadline",
+      "question": "How much advance notice is needed for planned leave?",
+      "expected_source_keywords": ["leave"],
+      "expected_answer_keywords": ["seven", "days"],
+      "should_abstain": false
+    },
+    {
+      "id": "account-lockout",
+      "question": "Who should I contact for an account lockout?",
+      "expected_source_keywords": ["it"],
+      "expected_answer_keywords": ["service", "desk"],
+      "should_abstain": false
+    },
+    {
+      "id": "travel-documents",
+      "question": "What information belongs in a travel request?",
+      "expected_source_keywords": ["travel"],
+      "expected_answer_keywords": ["destination", "purpose", "cost"],
+      "should_abstain": false
+    },
+    {
+      "id": "unsupported-parking",
+      "question": "What is the office parking reimbursement amount?",
+      "expected_source_keywords": [],
+      "expected_answer_keywords": [],
+      "should_abstain": true
+    }
+  ]
+}
